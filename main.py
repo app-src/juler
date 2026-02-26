@@ -7,12 +7,18 @@ from rasterizer import rasterize_text, print_grid
 from scraper import fetch_user_stats
 from planner import plan_commits
 
-def execute_plan(plan):
+def execute_plan(plan, repo_path=None):
     """
-    Executes the commit plan using git commands.
+    Executes the commit plan using git commands in the specified repo.
     """
     total = sum(count for _, count in plan)
-    print(f"Executing plan: {len(plan)} days, {total} total commits.")
+    # If repo_path is None, use current directory ('.')
+    target_repo = repo_path if repo_path else "."
+
+    # Resolve to absolute path to avoid ambiguity
+    target_repo = os.path.abspath(target_repo)
+
+    print(f"Executing plan: {len(plan)} days, {total} total commits in '{target_repo}'.")
 
     current = 0
     # Use environment for committer date
@@ -32,16 +38,17 @@ def execute_plan(plan):
             ]
 
             try:
-                subprocess.run(cmd, env=env, check=True, stdout=subprocess.DEVNULL)
+                # Use cwd to execute git in the target repository
+                subprocess.run(cmd, env=env, cwd=target_repo, check=True, stdout=subprocess.DEVNULL)
                 current += 1
                 if current % 10 == 0:
                     print(f"Progress: {current}/{total}...", end='\r')
             except subprocess.CalledProcessError as e:
-                print(f"Error creating commit: {e}")
+                print(f"Error creating commit in {target_repo}: {e}")
 
     print(f"\nDone. {current} commits created.")
 
-def process_input_file(filepath, username):
+def process_input_file(filepath, username, target_repo=None):
     if not os.path.exists(filepath):
         print(f"Input file {filepath} not found.")
         return
@@ -77,15 +84,16 @@ def process_input_file(filepath, username):
     if not plan:
         print("No commits needed (maybe grid is empty or target already reached).")
     else:
-        # 4. Execute
-        execute_plan(plan)
+        # 4. Execute (in target repo)
+        execute_plan(plan, target_repo)
 
-    # 5. Cleanup
+    # 5. Cleanup (in current/tool repo)
     print("Cleaning up input file...")
     with open(filepath, 'w') as f:
         f.write("")
 
-    # Commit the cleanup with CURRENT time
+    # Commit the cleanup with CURRENT time in the tool repo
+    # Note: We assume filepath is relative to current tool repo
     try:
         subprocess.run(["git", "add", filepath], check=True)
         # Use default env (current time) for this commit
@@ -98,10 +106,11 @@ def main():
     parser = argparse.ArgumentParser(description='GitHub Graffiti Tool')
     parser.add_argument('--username', type=str, required=True, help='GitHub username')
     parser.add_argument('--file', type=str, default=os.environ.get('GRAFFITI_INPUT_FILE', 'graffiti.txt'), help='Input file path')
+    parser.add_argument('--repo', type=str, help='Path to target repository for pixel commits (default: current dir)')
 
     args = parser.parse_args()
 
-    process_input_file(args.file, args.username)
+    process_input_file(args.file, args.username, args.repo)
 
 if __name__ == "__main__":
     main()
